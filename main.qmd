@@ -1,0 +1,3301 @@
+---
+title: "Biomass Analysis"
+format: typst
+---
+
+```{r}
+# Librairies
+# CRAN packages
+pkgs <- c(
+    "tibble", "dplyr", "purrr", "ggplot2", "patchwork", "car", "emmeans", "multcomp", "multcompView", "emmeans", "ggpubr", "broom", "tidyr", "here", "pwr", "ggtext", "ltc"
+)
+
+# Bioconductor packages
+# pkgs_bioc <- c(
+#     ""
+# )
+
+# Installer les packages CRAN si nécessaire
+for (pkg in pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg)
+  }
+  suppressPackageStartupMessages(
+    library(pkg, character.only = TRUE)
+    )
+}
+
+# Installer les packages Bioconductor si nécessaire
+# if (!requireNamespace("BiocManager", quietly = TRUE)) {
+#   install.packages("BiocManager")
+# }
+
+# Installer les Bioconductor packages
+# BiocManager::install(pkgs_bioc, update = FALSE, ask = FALSE)
+
+# Charger les Bioconductor packages
+# for (pkg in pkgs_bioc) {
+#   suppressPackageStartupMessages(
+#     library(pkg, character.only = TRUE)
+#   )
+# }
+
+# if (!require('name_github_pkg')) remotes::install_github('repo/pkg')
+# library('pkg_name')
+
+# WD 
+wd <- function(path = NULL) {
+  
+  if (!requireNamespace("here", quietly = TRUE)) {
+    stop("Package 'here' is required. Install it with install.packages('here').")
+  }
+  
+  if (!is.null(path)) {
+    
+    path <- path.expand(path)
+    
+    if (dir.exists(path)) {
+      
+      # définit le projet racine implicitement si possible
+      setwd(normalizePath(path))
+      message("Using path: ", normalizePath(path))
+      return(invisible(path))
+      
+    } else {
+      warning("Path does not exist: ", path)
+    }
+  }
+  
+  choice <- readline(
+    "Directory not found or not provided. Type 'f' (choose folder) or 'c' (current project root): "
+  )
+  
+  choice <- tolower(choice)
+  
+  if (choice == "f") {
+    
+    new_path <- dirname(file.choose())
+    
+    setwd(normalizePath(new_path))
+    message("Selected folder: ", new_path)
+    return(invisible(new_path))
+    
+  } else if (choice == "c") {
+    
+    root <- here::here()
+    setwd(normalizePath(root))
+    message("Using here() project root: ", root)
+    return(invisible(root))
+    
+  } else {
+    stop("Invalid option")
+  }
+}
+
+wd("~/Documents/R/memoire/Biomass_analysis/")
+
+#=== Colour vision accessibility check
+#ltc_cvd(ploen)                     # normal + deuteranopia / protanopia / tritanopia
+#ltc_cvd("ploen", severity = 0.6)   # milder simulation
+```
+
+#=== RCBD
+```{r}
+#Helper
+plot2pdf <- function(plot, file, width = 15, height = 7) {
+  pdf(file, width = width, height = height)
+  print(plot)
+  invisible(dev.off())
+}
+
+set.seed(123)
+
+jours <- paste0("Batch ", 1:4)
+traitements <- c("Blank","Trich.","Rhizo.","Trich. × Rhizo.")
+
+rep_mat <- matrix(
+  c(3,3,2,2,
+    2,3,3,2,
+    2,2,3,3,
+    3,2,2,3),
+  nrow = 4,
+  byrow = TRUE
+)
+
+positions <- expand.grid(row = 1:2, col = 1:5)
+
+design <- data.frame()
+
+for (i in 1:4) {
+  
+  trt <- rep(traitements, times = rep_mat[i, ])
+  
+  tmp <- data.frame(
+    jour = jours[i],
+    traitement = sample(trt)
+  )
+  
+  pos <- positions[sample(1:10), ]
+  
+  tmp <- cbind(tmp, pos)
+  
+  design <- rbind(design, tmp)
+}
+
+design
+
+plot <- ggplot(design, aes(x = col, y = row)) +
+  
+  # cells
+  geom_tile(aes(fill = traitement),
+            color = "black",
+            linewidth = 0.6) +
+  
+  # main label (treatment)
+  geom_text(aes(label = traitement),
+            size = 4.2,
+            fontface = "bold") +
+
+  geom_text(aes(label = paste0(row, ",", col)),
+            size = 3,
+            color = "black",
+            alpha = 0.6,
+            vjust = -1.2) +
+  
+  # day facets
+  facet_wrap(~ jour, nrow = 2) +
+  
+  # plate orientation
+  scale_y_reverse() +
+  coord_fixed() +
+  
+  # cleaner palette
+  scale_fill_brewer(palette = "Set2") +
+  
+  labs(
+    x = "Column",
+    y = "Row",
+    fill = "Treatment"
+  ) +
+  
+  theme_minimal(base_size = 14) +
+  
+  theme(
+    panel.grid = element_blank(),
+    
+    strip.text = element_text(face = "bold", size = 13),
+    
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    
+    legend.position = "right",
+    
+    plot.title = element_text(face = "bold", size = 16)
+  )
+
+plot2pdf(plot, file.path("Results/", "Exp_dsn_ori.pdf"))
+
+plot <- ggplot(design, aes(x = row, y = col)) +
+  
+  # cells
+  geom_tile(aes(fill = traitement),
+            color = "black",
+            linewidth = 0.6) +
+  
+  # main label (treatment)
+  geom_text(aes(label = traitement),
+            size = 4,
+            fontface = "bold") +
+
+  geom_text(aes(label = paste0(row, ",", col)),
+            size = 3,
+            color = "black",
+            alpha = 0.6,
+            vjust = -1.2) +
+  
+  # force day order
+  facet_wrap(~ factor(jour, levels = c("Batch 1", "Batch 2", "Batch 3", "Batch 4")),
+             nrow = 1) +
+  
+  coord_fixed() +
+  
+  scale_fill_brewer(palette = "Set2") +
+  
+  labs(
+    x = "Row",
+    y = "Column",
+    fill = "Treatment"
+  ) +
+  
+  theme_minimal(base_size = 14) +
+  
+  theme(
+    panel.grid = element_blank(),
+    strip.text = element_text(face = "bold", size = 13),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 16)
+  )
+
+plot2pdf(plot, file.path("Results/", "Exp_dsn_update.pdf"))
+
+# --- Exp 2
+set.seed(234)
+
+jours <- paste0("Batch ", 1:4)
+traitements <- c("Blank","Trich.","Rhizo.","Trich. × Rhizo.")
+
+rep_mat <- matrix(
+  c(3,2,2,3,
+    3,3,2,2,
+    2,3,3,2,
+    2,2,3,3),
+  nrow = 4,
+  byrow = TRUE
+)
+
+positions <- expand.grid(row = 1:2, col = 1:5)
+
+design <- data.frame()
+
+for (i in 1:4) {
+  
+  trt <- rep(traitements, times = rep_mat[i, ])
+  
+  tmp <- data.frame(
+    jour = jours[i],
+    traitement = sample(trt)
+  )
+  
+  pos <- positions[sample(1:10), ]
+  
+  tmp <- cbind(tmp, pos)
+  
+  design <- rbind(design, tmp)
+}
+
+design
+
+plot <- ggplot(design, aes(x = row, y = col)) +
+  
+  # cells
+  geom_tile(aes(fill = traitement),
+            color = "black",
+            linewidth = 0.6) +
+  
+  # main label (treatment)
+  geom_text(aes(label = traitement),
+            size = 4,
+            fontface = "bold") +
+
+  geom_text(aes(label = paste0(row, ",", col)),
+            size = 3,
+            color = "black",
+            alpha = 0.6,
+            vjust = -1.2) +
+  
+  # force day order
+  facet_wrap(~ factor(jour, levels = c("Batch 1", "Batch 2", "Batch 3", "Batch 4")),
+             nrow = 1) +
+  
+  coord_fixed() +
+  
+  scale_fill_brewer(palette = "Set2") +
+  
+  labs(
+    x = "Row",
+    y = "Column",
+    fill = "Treatment"
+  ) +
+  
+  theme_minimal(base_size = 14) +
+  
+  theme(
+    panel.grid = element_blank(),
+    strip.text = element_text(face = "bold", size = 13),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 16)
+  )
+  
+plot2pdf(plot, file.path("Results/", "Exp_dsn_update_2.pdf"))
+```
+
+#=== ANOVA
+```{r} 
+# =========================
+# FUNCTION
+# =========================
+
+run_unblock <- function(data, response, output_name, factors, outdir, tukey_padding = 0.10){
+
+  # =========================
+  # MODEL 
+  # =========================
+  formula <- as.formula(
+    paste(response, "~", paste(factors, collapse = " * "))
+  )
+  interaction_term <- paste(factors, collapse = ":")
+  model <- aov(formula, data = data)
+
+  # =========================
+  # ANOVA TABLE
+  # =========================
+  anova_table <- broom::tidy(model)
+  write.csv(
+    anova_table,
+    paste0(outdir, "/Tables/ANOVA_", output_name, ".csv"),
+    row.names = FALSE
+  )
+  
+  # =========================
+  # PARTIAL ETA SQUARED
+  # =========================
+  ss <- anova(model)[, "Sum Sq"]
+  ss_error <- ss[length(ss)]
+
+  eta_df <- data.frame(
+    Effect = rownames(anova(model))[1:(length(ss)-1)],
+    partial_eta_sq = ss[1:(length(ss)-1)] / (ss[1:(length(ss)-1)] + ss_error)
+  )
+
+  write.csv(
+    eta_df,
+    paste0(outdir, "/Tables/EtaSq_", output_name, ".csv"),
+    row.names = FALSE
+  )
+
+  # simple plot (parcimonieux)
+  pdf(paste0(outdir, "/Plots/EtaSq_", output_name, ".pdf"))
+  barplot(
+    eta_df$partial_eta_sq,
+    names.arg = eta_df$Effect,
+    ylim = c(0, 1),
+    ylab = expression(eta[p]^2),
+    main = paste("Partial eta squared -", output_name)
+  )
+  dev.off()
+
+  # =========================
+  # DESCRIPTIVE STATISTICS
+  # =========================
+  descriptive_df <- data %>%
+    group_by(across(all_of(factors))) %>%
+    summarise(
+      n = dplyr::n(),
+      Mean = mean(.data[[response]], na.rm = TRUE),
+      SD = sd(.data[[response]], na.rm = TRUE),
+      SE = SD / sqrt(n),
+      t_value = qt(0.975, df = n - 1),
+      CI95_low = Mean - t_value * SE,
+      CI95_high = Mean + t_value * SE,
+      .groups = "drop"
+    ) %>%
+    dplyr::select(-t_value)
+
+  write.csv(
+    descriptive_df,
+    paste0(outdir, "/Tables/Descriptive_", output_name, ".csv"),
+    row.names = FALSE
+  )
+
+  # =========================
+  # ASSUMPTIONS
+  # =========================
+  shapiro_res <- shapiro.test(residuals(model))
+
+  levene_res <- car::leveneTest(formula, data = data)
+
+  capture.output(
+    shapiro_res,
+    file = paste0(outdir, "/Tables/Shapiro_", output_name, ".txt")
+  )
+
+  write.csv(
+    as.data.frame(levene_res),
+    paste0(outdir, "/Tables/Levene_", output_name, ".csv"),
+    row.names = FALSE
+  )
+
+  # =========================
+  # QQ PLOT
+  # =========================
+  pdf(paste0(outdir, "/Plots/QQplot_", output_name, ".pdf"))
+
+  qqnorm(
+    residuals(model),
+    main = paste("QQ plot residuals -", output_name)
+  )
+  qqline(residuals(model), col = "red")
+
+  dev.off()
+
+  # =========================
+  # TUKEY #TODO: modify to only do it when P_val is significativ
+  # =========================
+  p_vals <- anova(model)[, "Pr(>F)"]
+  is_significant <- any(p_vals < 0.05, na.rm = TRUE)
+
+  if(is_significant){
+
+    tuk <- TukeyHSD(model)
+
+    write.csv(
+      as.data.frame(tuk[[interaction_term]]),
+      paste0(outdir, "/Tables/Tukey_", output_name, ".csv")
+    )
+
+    letters <- multcompLetters4(model, tuk)
+
+    letters_df <- data.frame(
+      Interaction = names(letters[[interaction_term]]$Letters),
+      Letters = letters[[interaction_term]]$Letters
+    )
+
+    # positions for plot (dynamic response)
+    data$Interaction <- do.call(interaction, c(data[factors], sep = ":"))
+    ypos <- data %>%
+      group_by(Interaction) %>%
+      summarise(
+        ypos = max(.data[[response]]) + tukey_padding * diff(range(.data[[response]])),
+        .groups = "drop"
+      )
+
+    letters_df <- left_join(letters_df, ypos, by = "Interaction")
+    letters_df$Tissue <- output_name
+
+    write.csv(
+      letters_df,
+      paste0(outdir, "/Tables/Letters_", output_name, ".csv"),
+      row.names = FALSE
+    )
+
+  } else {
+
+    tuk <- NULL
+
+    letters_df <- data.frame(
+      Interaction = NA,
+      Letters = NA,
+      ypos = NA,
+      Tissue = output_name
+    )
+  }
+  # =========================
+  # RETURN
+  # =========================
+  return(list(
+    model = model,
+    tukey = tuk,
+    letters = letters_df,
+    eta_sq = eta_df
+  ))
+}
+
+plot_violin_unblock <- function(
+    data,
+    model,
+    response,
+    ylabel,
+    letters_df,
+    treatment_colors = NULL,
+    facet_var = NULL,
+    facet_direction = c("rows", "cols"),
+    treatment_labels = NULL,   # ex: c(Volume = "mL", MS = "MS strength")
+    level_labels = NULL,       # ex: c(Prs = "+", Abs = "-")
+    padding_label = c(0.03, 0.20),
+    p_adj = NULL
+){
+
+  anova_res <- summary(model)[[1]][1:3, ]
+
+  if (is.null(p_adj)) {
+
+    # standard ANOVA p-values
+    p_values <- anova_res[, "Pr(>F)"]
+
+  } else {
+
+    # use FDR-corrected values
+    if (!"FDR" %in% colnames(p_adj)) {
+      stop("p_adj doit contenir une colonne 'FDR'")
+    }
+
+    p_values <- p_adj[
+      rownames(anova_res),
+      "FDR"
+    ]
+
+  }
+
+  p_label <- paste0(
+    stringr::str_pad(trimws(rownames(anova_res)), width = max(nchar(trimws(rownames(anova_res)))), side  = "right"),
+    ": p = ",
+    signif(p_values, 3),
+    collapse = "\n"
+  )
+
+  factors      <- attr(terms(model), "term.labels")
+  main_factors <- factors[!grepl(":", factors)] 
+  x_label      <- paste(main_factors, collapse = " × ")
+
+  # --- Detect an empty / non-significant letters_df (all NA) ---
+  if (!is.null(letters_df)) {
+    if (nrow(letters_df) == 0 || all(is.na(letters_df$Interaction))) {
+      letters_df <- NULL
+    }
+  }
+
+  # --- Enrich letters_df with facet_var if absent ---
+  if (!is.null(facet_var) && !is.null(letters_df) && !facet_var %in% colnames(letters_df)) {
+
+    interaction_facet_map <- data %>%
+      dplyr::select(dplyr::all_of(c("Interaction", facet_var))) %>%
+      dplyr::mutate(dplyr::across(everything(), as.character)) %>%
+      dplyr::distinct()
+
+    letters_df <- letters_df %>%
+      dplyr::mutate(Interaction = as.character(Interaction)) %>%
+      dplyr::left_join(interaction_facet_map, by = "Interaction")
+  }
+
+  # --- Filter letters_df: keep only interactions from the correct facet ---
+  if (!is.null(facet_var) && !is.null(letters_df) && facet_var %in% colnames(letters_df)) {
+    letters_df <- letters_df %>%
+      dplyr::filter(
+        as.character(.data[[facet_var]]) ==
+          as.character(data[[facet_var]][match(Interaction, data$Interaction)])
+      )
+  }
+
+  # --- helper: escape sensitive markdown characters (avoids <ul> bug) ---
+  escape_md <- function(x) {
+    gsub("([*+_#-])", "\\\\\\1", x)
+  }
+
+  # --- helper: apply level_labels to a raw value if provided ---
+  apply_level_label <- function(x) {
+    if (is.null(level_labels)) return(x)
+    out <- as.character(x)
+    matched <- out %in% names(level_labels)
+    out[matched] <- level_labels[out[matched]]
+    out <- escape_md(out)
+    out
+  }
+
+   # --- X-axis label: keep only the factor NOT used as facet_var ---
+  # main_factors is in the same order as the parts of Interaction (separated by ":")
+  axis_factor <- if (!is.null(facet_var) && facet_var %in% main_factors) {
+    setdiff(main_factors, facet_var)
+  } else {
+    main_factors
+  }
+
+  if (!is.null(facet_var) && length(main_factors) == 2 && facet_var %in% main_factors) {
+
+    facet_pos <- which(main_factors == facet_var)
+    axis_pos  <- setdiff(seq_along(main_factors), facet_pos)
+
+    data <- data %>%
+      dplyr::mutate(
+        .axis_value = sapply(
+          strsplit(as.character(Interaction), ":"),
+          function(x) x[axis_pos]
+        )
+      )
+
+    # --- apply level_labels (e.g. Prs -> +) BEFORE the treatment_labels suffix ---
+    data <- data %>%
+      dplyr::mutate(.axis_value = apply_level_label(.axis_value))
+
+    # apply custom label (e.g. "*T. asperellum*") if provided — markdown allowed
+    axis_suffix <- if (!is.null(treatment_labels) && axis_factor %in% names(treatment_labels)) {
+      treatment_labels[[axis_factor]]
+    } else {
+      ""
+    }
+
+    data <- data %>%
+      dplyr::mutate(
+        .axis_label = paste0(.axis_value, ifelse(axis_suffix == "", "", paste0(" ", axis_suffix)))
+      )
+
+    # order x-axis labels according to the order of appearance of Interaction
+    axis_order <- data %>%
+      dplyr::distinct(Interaction, .axis_label) %>%
+      dplyr::arrange(Interaction) %>%
+      dplyr::pull(.axis_label) %>%
+      unique()
+
+    data$.axis_label <- factor(data$.axis_label, levels = axis_order)
+
+    x_aes_var <- ".axis_label"
+
+  } else {
+    x_aes_var <- "Interaction"
+  }
+
+  # --- adaptive plot height #TODO: fix bug "Removed 1 row containing missing values or values outside the scale range (`geom_point()`). -> when point outside of scale range, force the plot and increase the scale-range"
+  # Determine the maximum height to display
+  ymax_data <- max(data[[response]], na.rm = TRUE)
+
+  if (!is.null(letters_df)) {
+    ymax_letters <- max(letters_df$ypos, na.rm = TRUE)
+    ymax <- max(ymax_data, ymax_letters)
+  } else {
+    ymax <- ymax_data
+  }
+
+  ymin   <- min(data[[response]], na.rm = TRUE)
+  yrange <- ymax - ymin
+  padding <- padding_label[1] * yrange
+
+  p <- ggplot(
+    data,
+    aes(x = .data[[x_aes_var]], y = .data[[response]], fill = Interaction)
+  ) +
+    geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0) +
+    geom_jitter(
+      aes(color = Interaction),
+      width = 0.12, alpha = 0.7, size = 4, show.legend = FALSE
+    ) +
+    scale_y_continuous(limits = c(ymin, ymax + padding_label[2] * yrange + padding), expand = expansion(mult = c(0.05, 0))) +
+    theme_bw(base_size = 20) +    # --- taille de base augmentée pour PowerPoint ---
+    theme(
+      legend.position = "none",
+      axis.text.x  = ggtext::element_markdown(angle = 45, hjust = 1, size = 24),
+      axis.text.y  = element_text(size = 24),
+      axis.title.y = element_text(size = 26, face = "bold"),
+      axis.title.x = if (!is.null(facet_var)) element_blank() else element_text(size = 26, face = "bold"),
+      strip.text   = ggtext::element_markdown(size = 24, face = "bold")
+    ) +
+    labs(
+      x = if (!is.null(facet_var)) NULL else paste0("Treatment (", x_label, ")"),
+      y = ylabel
+    )
+
+  # --- Tukey letters ---
+  if (!is.null(letters_df)) {
+
+    if (x_aes_var == ".axis_label") {
+      letters_df <- letters_df %>%
+        dplyr::left_join(
+          data %>% dplyr::distinct(Interaction, .axis_label),
+          by = "Interaction"
+        )
+      p <- p + geom_text(
+        data = letters_df,
+        aes(x = .axis_label, y = ypos, label = Letters),
+        inherit.aes = FALSE,
+        size = 7
+      )
+    } else {
+      p <- p + geom_text(
+        data = letters_df,
+        aes(x = Interaction, y = ypos, label = Letters),
+        inherit.aes = FALSE,
+        size = 7
+      )
+    }
+  }
+
+  # --- Colors ---
+  if (!is.null(treatment_colors)) {
+    p <- p +
+      scale_color_manual(values = treatment_colors) +
+      scale_fill_manual(values  = treatment_colors)
+  }
+
+  # --- Facet + P-val ---
+  facet_direction <- match.arg(facet_direction)
+
+  if (!is.null(facet_var)) {
+
+    # build custom labels for the facet strip
+    facet_levels_raw <- sort(unique(as.character(data[[facet_var]])))
+
+     # --- apply level_labels (e.g. Prs -> +) to the facet value, escaped ---
+    facet_levels_display <- apply_level_label(facet_levels_raw)
+
+    if (!is.null(treatment_labels) && facet_var %in% names(treatment_labels)) {
+      facet_suffix  <- treatment_labels[[facet_var]]
+      facet_labeller <- setNames(
+        paste0(facet_levels_display, " ", facet_suffix),
+        facet_levels_raw
+      )
+    } else {
+      facet_labeller <- setNames(facet_levels_display, facet_levels_raw)
+    }
+
+    if (facet_direction == "rows") {
+      p <- p + facet_grid(
+        rows = vars(.data[[facet_var]]),
+        scales = "free_x",
+        space = "free_x",
+        labeller = labeller(.rows = facet_labeller)
+      )
+    } else {
+      p <- p + facet_grid(
+        cols = vars(.data[[facet_var]]),
+        scales = "free_x",
+        space = "free_x",
+        labeller = labeller(.cols = facet_labeller)
+      )
+    }
+
+    first_facet <- facet_levels_raw[1]
+
+    ann_df <- data.frame(label = p_label, stringsAsFactors = FALSE)
+    ann_df[[facet_var]] <- first_facet
+
+    p <- p + geom_label(
+      data = ann_df,
+      aes(label = label),
+      x = -Inf,
+      y = Inf,
+      hjust = -0.05,
+      vjust = 1.1,
+      size = 7,            # --- enlarged for PowerPoint ---
+      fill = "white",
+      alpha = 0.9
+    )
+
+  } else {
+
+    p <- p + annotate(
+      "label",
+      x = -Inf, y = Inf,
+      label = p_label,
+      hjust = -0.05, vjust = 1.1,
+      size  = 7,
+      fill  = "white",
+      alpha = 0.9
+    )
+  }
+
+  return(p)
+}
+
+run <- function(data, response, output_name, factors, outdir, tukey_padding = 0.10){
+
+  # =========================
+  # MODEL 
+  # =========================
+  factors_formula <- paste(factors, collapse = " * ")
+  interaction_term <- paste(factors_formula, collapse = ":")
+
+  if ("Block" %in% names(data)) {
+    formula_txt <- paste(response, "~", interaction_term, "+ Block")
+    formula <- as.formula(formula_txt)
+  } else {
+    formula_txt <- paste(response, "~", interaction_term)
+    formula <- as.formula(formula_txt)
+  }
+  
+  formula_factors <- as.formula(paste(response, "~", interaction_term))
+
+  model <- aov(formula, data = data)
+
+  # =========================
+  # ANOVA TABLE
+  # =========================
+  anova_table <- broom::tidy(model)
+  write.csv(
+    anova_table,
+    paste0(outdir, "/Tables/ANOVA_", output_name, ".csv"),
+    row.names = FALSE
+  )
+  
+  # =========================
+  # PARTIAL ETA SQUARED
+  # =========================
+
+  anova_table <- anova(model)
+
+  ss <- anova_table[, "Sum Sq"]
+  terms <- rownames(anova_table)
+
+  # Residual sum of squares
+  ss_error <- ss[terms == "Residuals"]
+
+  # Keep only experimental terms present in the model
+  experimental_terms <- factors[
+    factors %in% terms
+  ]
+
+  # Get their row positions
+  effect_idx <- match(experimental_terms, terms)
+
+  eta_df <- data.frame(
+    Effect = experimental_terms,
+    partial_eta_sq =
+      ss[effect_idx] /
+      (ss[effect_idx] + ss_error)
+  )
+
+  write.csv(
+    eta_df,
+    paste0(outdir, "/Tables/EtaSq_", output_name, ".csv"),
+    row.names = FALSE
+  )
+
+  # =========================
+  # SIMPLE PLOT
+  # =========================
+
+  pdf(
+   paste0(
+      outdir,
+      "/Plots/EtaSq_",
+      output_name,
+      ".pdf"
+    )
+  )
+
+  barplot(
+    eta_df$partial_eta_sq,
+    names.arg = eta_df$Effect,
+    ylim = c(0, 1),
+    ylab = expression(eta[p]^2),
+    main = paste(
+      "Partial eta squared -",
+      output_name
+    )
+  )
+
+  dev.off()
+
+  # =========================
+  # DESCRIPTIVE STATISTICS
+  # =========================
+  descriptive_df <- data %>%
+    group_by(across(all_of(factors))) %>%
+    summarise(
+      n = dplyr::n(),
+      Mean = mean(.data[[response]], na.rm = TRUE),
+      SD = sd(.data[[response]], na.rm = TRUE),
+      SE = SD / sqrt(n),
+      t_value = qt(0.975, df = n - 1),
+      CI95_low = Mean - t_value * SE,
+      CI95_high = Mean + t_value * SE,
+      .groups = "drop"
+    ) %>%
+    dplyr::select(-t_value)
+
+  write.csv(
+    descriptive_df,
+    paste0(outdir, "/Tables/Descriptive_", output_name, ".csv"),
+    row.names = FALSE
+  )
+
+  # =========================
+  # ASSUMPTIONS
+  # =========================
+  shapiro_res <- shapiro.test(residuals(model))
+
+  levene_res <- car::leveneTest(formula_factors, data = data)
+
+  capture.output(
+    shapiro_res,
+    file = paste0(outdir, "/Tables/Shapiro_", output_name, ".txt")
+  )
+
+  write.csv(
+    as.data.frame(levene_res),
+    paste0(outdir, "/Tables/Levene_", output_name, ".csv"),
+    row.names = FALSE
+  )
+
+  # =========================
+  # QQ PLOT
+  # =========================
+  pdf(paste0(outdir, "/Plots/QQplot_", output_name, ".pdf"))
+
+  qqnorm(
+    residuals(model),
+    main = paste("QQ plot residuals -", output_name)
+  )
+  qqline(residuals(model), col = "red")
+
+  dev.off()
+
+  # =========================
+  # TUKEY
+  # =========================
+
+  p_vals <- anova(model)[, "Pr(>F)"]
+
+  # Only consider experimental effects, not Block
+  experimental_terms <- c(
+    factors,
+    paste(factors, collapse = ":")
+  )
+
+  is_significant <- any(
+    p_vals[rownames(anova(model)) %in% experimental_terms] < 0.05,
+    na.rm = TRUE
+  )
+
+  if (is_significant) {
+
+    # Estimated marginal means for all treatment combinations
+    emm <- emmeans::emmeans(
+      model,
+      specs = as.formula(
+        paste("~", paste(factors, collapse = " * "))
+      )
+    )
+
+    # Tukey pairwise comparisons
+    tuk <- pairs(
+      emm,
+      adjust = "tukey"
+    )
+
+    write.csv(
+      as.data.frame(tuk),
+      paste0(outdir, "/Tables/Tukey_", output_name, ".csv"),
+      row.names = FALSE
+    )
+
+    # Compact letter display
+    letters <- multcomp::cld(
+      emm,
+      adjust = "tukey",
+      Letters = letters,
+      sort = FALSE
+    )
+
+    # Build interaction identifier
+    letters_df <- as.data.frame(letters)
+
+    letters_df$Interaction <- do.call(
+      interaction,
+      c(letters_df[factors], sep = ":")
+    )
+
+    letters_df$Letters <- trimws(letters_df$.group)
+
+    # Position for plot
+    ypos <- data %>%
+      group_by(across(all_of(factors))) %>%
+      summarise(
+        ypos = max(
+          .data[[response]],
+          na.rm = TRUE
+        ) +
+          tukey_padding *
+          diff(range(.data[[response]], na.rm = TRUE)),
+        .groups = "drop"
+      ) %>%
+      mutate(
+        Interaction = do.call(
+          interaction,
+          c(across(all_of(factors)), sep = ":")
+        )
+      )
+
+    letters_df <- left_join(
+      letters_df,
+      ypos %>% dplyr::select(Interaction, ypos),
+      by = "Interaction"
+    )  
+
+    letters_df$Tissue <- output_name
+
+    write.csv(
+      letters_df,
+      paste0(outdir, "/Tables/Letters_", output_name, ".csv"),
+      row.names = FALSE
+    )
+
+  } else {
+
+   tuk <- NULL
+
+    letters_df <- data.frame(
+      Interaction = NA,
+      Letters = NA,
+      ypos = NA,
+      Tissue = output_name
+    )
+  }
+  # =========================
+  # RETURN
+  # =========================
+  return(list(
+    model = model,
+    tukey = tuk,
+    letters = letters_df,
+    eta_sq = eta_df
+  ))
+}
+
+fdr <- function(aerial, roots, effect){
+
+  p <- c(
+    aerial[effect, "Pr(>F)"],
+    roots[effect, "Pr(>F)"]
+  )
+
+  p.adjust(p, method = "fdr")
+}
+
+plot_violin <- function(
+    data,
+    model,
+    response,
+    ylabel,
+    letters_df,
+    treatment_colors = NULL,
+    facet_var = NULL,
+    facet_direction = c("rows", "cols"),
+    treatment_labels = NULL,   # ex: c(Volume = "mL", MS = "MS strength")
+    level_labels = NULL,        # ex: c(Prs = "+", Abs = "-")
+    padding_label = c(0.03, 0.20),
+    p_adj = NULL
+){
+
+  anova_res <- summary(model)[[1]][c(1,2,4), ]
+
+  if (is.null(p_adj)) {
+
+    # standard ANOVA p-values
+    p_values <- anova_res[, "Pr(>F)"]
+
+  } else {
+
+    # use FDR-corrected values
+    if (!"FDR" %in% colnames(p_adj)) {
+      stop("p_adj doit contenir une colonne 'FDR'")
+    }
+
+    p_values <- p_adj[
+      rownames(anova_res),
+      "FDR"
+    ]
+
+  }
+
+  p_label <- paste0(
+    stringr::str_pad(trimws(rownames(anova_res)), width = max(nchar(trimws(rownames(anova_res)))), side  = "right"),
+    ": p = ",
+    signif(p_values, 3),
+    collapse = "\n"
+  )
+
+  factors      <- attr(terms(model)[c(1,2,4)], "term.labels")
+  main_factors <- factors[!grepl(":", factors)]   # order = order in Interaction
+  x_label      <- paste(main_factors, collapse = " × ")
+
+  # --- Detect an empty / non-significant letters_df (all NA) ---
+  if (!is.null(letters_df)) {
+    if (nrow(letters_df) == 0 || all(is.na(letters_df$Interaction))) {
+      letters_df <- NULL
+    }
+  }
+
+  # --- Enrich letters_df with facet_var if absent ---
+  if (!is.null(facet_var) && !is.null(letters_df) && !facet_var %in% colnames(letters_df)) {
+
+    interaction_facet_map <- data %>%
+      dplyr::select(dplyr::all_of(c("Interaction", facet_var))) %>%
+      dplyr::mutate(dplyr::across(everything(), as.character)) %>%
+      dplyr::distinct()
+
+    letters_df <- letters_df %>%
+      dplyr::mutate(Interaction = as.character(Interaction)) %>%
+      dplyr::left_join(interaction_facet_map, by = "Interaction")
+  }
+
+  # --- Filter letters_df: keep only interactions from the correct facet ---
+  if (!is.null(facet_var) && !is.null(letters_df) && facet_var %in% colnames(letters_df)) {
+    letters_df <- letters_df %>%
+      dplyr::filter(
+        as.character(.data[[facet_var]]) ==
+          as.character(data[[facet_var]][match(Interaction, data$Interaction)])
+      )
+  }
+
+  # --- helper: escape sensitive markdown characters (avoids <ul> bug) ---
+  escape_md <- function(x) {
+    gsub("([*+_#-])", "\\\\\\1", x)
+  }
+
+  # --- helper: apply level_labels to a raw value if provided ---
+  apply_level_label <- function(x) {
+    if (is.null(level_labels)) return(x)
+    out <- as.character(x)
+    matched <- out %in% names(level_labels)
+    out[matched] <- level_labels[out[matched]]
+    out <- escape_md(out)
+    out
+  }
+
+  # --- X-axis label: keep only the factor NOT used as facet_var ---
+  # main_factors is in the same order as the parts of Interaction (separated by ":")
+  axis_factor <- if (!is.null(facet_var) && facet_var %in% main_factors) {
+    setdiff(main_factors, facet_var)
+  } else {
+    main_factors
+  }
+
+  if (!is.null(facet_var) && length(main_factors) == 2 && facet_var %in% main_factors) {
+
+    facet_pos <- which(main_factors == facet_var)
+    axis_pos  <- setdiff(seq_along(main_factors), facet_pos)
+
+    data <- data %>%
+      dplyr::mutate(
+        .axis_value = sapply(
+          strsplit(as.character(Interaction), ":"),
+          function(x) x[axis_pos]
+        )
+      )
+
+    # --- apply level_labels (e.g. Prs -> +) BEFORE the treatment_labels suffix ---
+    data <- data %>%
+      dplyr::mutate(.axis_value = apply_level_label(.axis_value))
+
+    # apply custom label (e.g. "*T. asperellum*") if provided — markdown allowed
+    axis_suffix <- if (!is.null(treatment_labels) && axis_factor %in% names(treatment_labels)) {
+      treatment_labels[[axis_factor]]
+    } else {
+      ""
+    }
+
+    data <- data %>%
+      dplyr::mutate(
+        .axis_label = paste0(.axis_value, ifelse(axis_suffix == "", "", paste0(" ", axis_suffix)))
+      )
+
+    # order x-axis labels according to the order of appearance of Interaction
+    axis_order <- data %>%
+      dplyr::distinct(Interaction, .axis_label) %>%
+      dplyr::arrange(Interaction) %>%
+      dplyr::pull(.axis_label) %>%
+      unique()
+
+    data$.axis_label <- factor(data$.axis_label, levels = axis_order)
+
+    x_aes_var <- ".axis_label"
+
+  } else {
+    x_aes_var <- "Interaction"
+  }
+
+  # --- adaptive plot height #TODO: fix bug "Removed 1 row containing missing values or values outside the scale range (`geom_point()`). -> when point outside of scale range, force the plot and increase the scale-range"
+  # Determine the maximum height to display
+  ymax_data <- max(data[[response]], na.rm = TRUE)
+
+  if (!is.null(letters_df)) {
+    ymax_letters <- max(letters_df$ypos, na.rm = TRUE)
+    ymax <- max(ymax_data, ymax_letters)
+  } else {
+    ymax <- ymax_data
+  }
+
+  ymin   <- min(data[[response]], na.rm = TRUE)
+  yrange <- ymax - ymin
+  padding <- padding_label[1] * yrange
+
+  p <- ggplot(
+    data,
+    aes(x = .data[[x_aes_var]], y = .data[[response]], fill = Interaction)
+  ) +
+    geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0) +
+    geom_jitter(
+      aes(color = Interaction),
+      width = 0.12, alpha = 0.7, size = 4, show.legend = FALSE
+    ) +
+    scale_y_continuous(limits = c(ymin, ymax + padding_label[2] * yrange + padding), expand = expansion(mult = c(0.05, 0))) +
+    theme_bw(base_size = 20) +     # --- base size increased for PowerPoint ---
+    theme(
+      legend.position = "none",
+      axis.text.x  = ggtext::element_markdown(angle = 45, hjust = 1, size = 24),
+      axis.text.y  = element_text(size = 24),
+      axis.title.y = element_text(size = 26, face = "bold"),
+      axis.title.x = if (!is.null(facet_var)) element_blank() else element_text(size = 26, face = "bold"),
+      strip.text   = ggtext::element_markdown(size = 24, face = "bold")
+    ) +
+    labs(
+      x = if (!is.null(facet_var)) NULL else paste0("Treatment (", x_label, ")"),
+      y = ylabel
+    )
+
+  # --- Tukey letters ---
+  if (!is.null(letters_df)) {
+
+    if (x_aes_var == ".axis_label") {
+      letters_df <- letters_df %>%
+        dplyr::left_join(
+          data %>% dplyr::distinct(Interaction, .axis_label),
+          by = "Interaction"
+        )
+      p <- p + geom_text(
+        data = letters_df,
+        aes(x = .axis_label, y = ypos, label = Letters),
+        inherit.aes = FALSE,
+        size = 7
+      )
+    } else {
+      p <- p + geom_text(
+        data = letters_df,
+        aes(x = Interaction, y = ypos, label = Letters),
+        inherit.aes = FALSE,
+        size = 7
+      )
+    }
+  }
+
+  # --- Colors ---
+  if (!is.null(treatment_colors)) {
+    p <- p +
+      scale_color_manual(values = treatment_colors) +
+      scale_fill_manual(values  = treatment_colors)
+  }
+
+  # --- Facet + P-val ---
+  facet_direction <- match.arg(facet_direction)
+
+  if (!is.null(facet_var)) {
+
+    # build custom labels for the facet strip
+    facet_levels_raw <- sort(unique(as.character(data[[facet_var]])))
+
+    # --- apply level_labels (e.g. Prs -> +) to the facet value, escaped ---
+    facet_levels_display <- apply_level_label(facet_levels_raw)
+
+    if (!is.null(treatment_labels) && facet_var %in% names(treatment_labels)) {
+      facet_suffix  <- treatment_labels[[facet_var]]
+      facet_labeller <- setNames(
+        paste0(facet_levels_display, " ", facet_suffix),
+        facet_levels_raw
+      )
+    } else {
+      facet_labeller <- setNames(facet_levels_display, facet_levels_raw)
+    }
+
+    if (facet_direction == "rows") {
+      p <- p + facet_grid(
+        rows = vars(.data[[facet_var]]),
+        scales = "free_x",
+        space = "free_x",
+        labeller = labeller(.rows = facet_labeller)
+      )
+    } else {
+      p <- p + facet_grid(
+        cols = vars(.data[[facet_var]]),
+        scales = "free_x",
+        space = "free_x",
+        labeller = labeller(.cols = facet_labeller)
+      )
+    }
+
+    first_facet <- facet_levels_raw[1]
+
+    ann_df <- data.frame(label = p_label, stringsAsFactors = FALSE)
+    ann_df[[facet_var]] <- first_facet
+
+    p <- p + geom_label(
+      data = ann_df,
+      aes(label = label),
+      x = -Inf,
+      y = Inf,
+      hjust = -0.05,
+      vjust = 1.1,
+      size = 7,            # --- enlarged for PowerPoint ---
+      fill = "white",
+      alpha = 0.9
+    )
+
+  } else {
+
+    p <- p + annotate(
+      "label",
+      x = -Inf, y = Inf,
+      label = p_label,
+      hjust = -0.05, vjust = 1.1,
+      size  = 7,
+      fill  = "white",
+      alpha = 0.9
+    )
+  }
+
+  return(p)
+}
+
+# --- power analysis TODO: add to run() 
+power_from_eta_sq <- function(eta_df,
+                              alpha = 0.05,
+                              power = 0.80,
+                              k = 2,
+                              effects = c("MicB", "MicP", "MicB:MicP")) {
+
+  # keep only the requested effects
+  eta_df <- eta_df[eta_df$Effect %in% effects, ]
+
+  # conversion from eta² -> f
+  eta_df$f <- sqrt(eta_df$partial_eta_sq / (1 - eta_df$partial_eta_sq))
+
+  # power analysis for each effect
+  res <- lapply(seq_len(nrow(eta_df)), function(i) {
+
+    eff <- eta_df$Effect[i]
+    f   <- eta_df$f[i]
+
+    # ANOVA 2 groups (MicB or MicP isolated)
+    pwr_out <- pwr.anova.test(
+      k = k,
+      f = f,
+      sig.level = alpha,
+      power = power
+    )
+
+    data.frame(
+      Effect = eff,
+      eta_sq = eta_df$partial_eta_sq[i],
+      f = f,
+      n_per_group = ceiling(pwr_out$n),
+      total_n = ceiling(pwr_out$n) * k
+    )
+  })
+
+  do.call(rbind, res)
+}
+
+#power_from_eta_sq(res_aerial$eta_sq)
+#power_from_eta_sq(res_roots$eta_sq)
+```
+
+#Trial
+```{r}
+# =========================
+# INIT
+# =========================
+dir.create("Results", showWarnings = FALSE)
+dir.create("Results/Tables", showWarnings = FALSE)
+dir.create("Results/Plots", showWarnings = FALSE)
+
+# =========================
+# LOAD DATA
+# =========================
+aerial <- read.csv("Data/aerialbiomass.csv")
+roots  <- read.csv("Data/rootsbiomass.csv")
+
+aerial$Tissue <- "Aerial"
+roots$Tissue  <- "Roots"
+
+colnames(aerial)[3] <- "Biomass"
+colnames(roots)[3]  <- "Biomass"
+
+df <- bind_rows(aerial, roots)
+
+df <- df %>%
+  mutate(
+    Volume = factor(Volume),
+    MS = factor(MS),
+    Tissue = factor(Tissue),
+    Interaction = interaction(Volume, MS, sep = ":")
+  )
+
+res_aerial <- run_unblock(
+  filter(df, Tissue == "Aerial"),
+  "Biomass",
+  "Aerial",
+  c("Volume", "MS"),
+  "Results"
+)
+
+res_roots <- run_unblock(
+  filter(df, Tissue == "Roots"),
+  "Biomass",
+  "Roots",
+  c("Volume", "MS"),
+  "Results"
+)
+
+# treatment_colors <- c(
+#   "20:0.5" = "#9ecae1",
+#   "20:1"   = "#08519c",
+#   "40:0.5" = "#fdae6b",
+#   "40:1"   = "#d94801"
+# )
+
+treatment_colors <- c(
+  "20:0.5" = ltc("ploen")[3],
+  "20:1"   = ltc("ploen")[1],
+  "40:0.5" = ltc("ploen")[4],
+  "40:1"   = ltc("ploen")[5]
+)
+
+anova_aerial <- as.data.frame(summary(res_aerial$model)[[1]])
+anova_roots  <- as.data.frame(summary(res_roots$model)[[1]])
+
+anova_aerial$FDR <- NA
+anova_roots$FDR <- NA
+
+effects <- rownames(anova_aerial)[1:3]
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_aerial,
+    anova_roots,
+    effect
+  )
+  
+  anova_aerial[effect, "FDR"] <- adj[1]
+  anova_roots[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_aerial,
+  "Results/Tables/ANOVA_Arial_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_roots,
+  "Results/Tables/ANOVA_Roots_FDR.csv",
+  row.names = FALSE
+)
+
+p_aerial <- plot_violin_unblock(
+  filter(df, Tissue == "Aerial"),
+  res_aerial$model,
+  "Biomass",
+  "Shoot biomass (mg)",
+  res_aerial$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MS",
+  facet_direction = "cols",
+  treatment_labels = c(Volume = "mL", MS = "MS strength"),
+  p_adj = anova_aerial
+)
+
+p_roots <- plot_violin_unblock(
+  filter(df, Tissue == "Roots"),
+  res_roots$model,
+  "Biomass",
+  "Roots biomass (mg)",
+  res_roots$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MS",
+  facet_direction = "cols",
+  treatment_labels = c(Volume = "mL", MS = "MS strength"),
+  p_adj = anova_roots
+)
+
+p <- p_aerial | p_roots
+
+ggsave(
+  filename = "Results/Plots/Biomass_boxplot.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Plots/Biomass_boxplot.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+
+dir.create("Results", showWarnings = FALSE)
+dir.create("Results/Rhizo", showWarnings = FALSE)
+dir.create("Results/Rhizo/Tables", showWarnings = FALSE)
+dir.create("Results/Rhizo/Plots", showWarnings = FALSE)
+
+# --- Init
+df <- read.csv("Data/Rhizo.csv")
+
+# clean names
+colnames(df) <- c(
+  "Volume",
+  "MS",
+  "total_length",
+  "avg_diameter",
+  "d_0_2",
+  "d_2_5",
+  "d_5_plus"
+)
+
+df$Volume <- factor(df$Volume)
+df$MS <- factor(df$MS)
+df$Interaction <- interaction(df$Volume, df$MS, sep = ":")
+
+res_length <- run_unblock(df, "total_length", "total_length", factors = c("Volume", "MS"), "Results/Rhizo")
+res_diam <- run_unblock(df, "avg_diameter", "avg_diameter", factors = c("Volume", "MS"), "Results/Rhizo")
+
+anova_length <- as.data.frame(summary(res_length$model)[[1]])
+anova_diam  <- as.data.frame(summary(res_diam$model)[[1]])
+
+anova_length$FDR <- NA
+anova_diam$FDR <- NA
+
+effects <- rownames(anova_length)[1:3]
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_length,
+    anova_diam,
+    effect
+  )
+  
+  anova_length[effect, "FDR"] <- adj[1]
+  anova_diam[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_length,
+  "Results/Rhizo/Tables/ANOVA_Length_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_diam,
+  "Results/Rhizo/Tables/ANOVA_Diam_FDR.csv",
+  row.names = FALSE
+)
+
+p_length <- plot_violin_unblock(
+  df,
+  res_length$model,
+  "total_length",
+  "Total roots length (cm)",
+  res_length$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MS",
+  facet_direction = "cols",
+  treatment_labels = c(Volume = "mL", MS = "MS strength"),
+  p_adj = anova_length
+)
+
+p_diam <- plot_violin_unblock(
+  df,
+  res_diam$model,
+  "avg_diameter",
+  "Average roots diameter (cm)",
+  res_diam$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MS",
+  facet_direction = "cols",
+  treatment_labels = c(Volume = "mL", MS = "MS strength"),
+  p_adj = anova_diam
+)
+
+p <- p_length | p_diam
+
+ggsave(
+  filename = "Results/Rhizo/Plots/Rhizo_boxplot.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Rhizo/Plots/Rhizo_boxplot.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+
+p <- p_aerial | p_roots | p_length
+
+ggsave(
+  filename = "Results/Plots/Pres_boxplot.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Plots/Pres_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Plots/Pres_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+
+
+# --- INIT Diameter categories #continuer de modifer cette partie comme les autres
+df_long <- df %>%
+  dplyr::mutate(
+    Volume = factor(Volume),
+    MS = factor(MS),
+    Interaction = interaction(Volume, MS, sep = ":")
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(d_0_2, d_2_5, d_5_plus),
+    names_to = "diameter_class",
+    values_to = "root_length"
+  )
+
+# prettier labels
+df_long$diameter_class <- factor(
+  df_long$diameter_class,
+  levels = c("d_0_2", "d_2_5", "d_5_plus"),
+  labels = c("0-2 px", "2-5 px", ">5 px")
+)
+
+# --- Plot #TODO : fix chi2, wrong one 
+plot_list <- list()
+
+plot_list <- list()
+
+for(i in levels(df_long$diameter_class)){
+
+  sub_df <- df_long %>%
+    dplyr::filter(diameter_class == i)
+
+  res <- run_unblock(
+    data = sub_df,
+    response = "root_length",
+    output_name = i,
+    factors = c("Volume", "MS"),
+    outdir = "Results/Rhizo"
+  )
+
+  p <- plot_violin_unblock(
+    data = sub_df,
+    model = res$model,
+    response = "root_length",
+    ylabel = "Roots length (cm)",
+    letters_df = res$letters,
+    treatment_colors = treatment_colors
+  ) +
+    ggtitle(paste("Diameter class:", i))
+
+  plot_list[[i]] <- p
+}
+
+
+p_combined <- (
+  plot_list[[1]] | plot_list[[2]] | plot_list[[3]]
+)
+
+ggsave(
+  filename = "Results/Rhizo/Plots/length_by_diam_class_boxplot.pdf",
+  plot = p_combined,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Rhizo/Plots/length_by_diam_class_boxplot.pdf",
+  plot = p_combined,
+  width = 17,
+  height = 10
+)
+
+
+# save
+ggsave(
+  "Results/Rhizo/RootLength_by_diameter_by_treatment.pdf",
+  p_combined,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  "Results/Rhizo/RootLength_by_diameter_by_treatment.pdf",
+  p_combined,
+  width = 17,
+  height = 10
+)
+```
+
+#Exp1
+```{r} 
+# =========================
+# INIT
+# =========================
+dir.create("Results/Exp1", showWarnings = FALSE)
+dir.create("Results/Exp1/Tables", showWarnings = FALSE)
+dir.create("Results/Exp1/Plots", showWarnings = FALSE)
+          
+# =========================
+# LOAD DATA
+# =========================
+aerial <- read.csv("Data/Exp1/aerialbiomass.csv")
+roots  <- read.csv("Data/Exp1/rootsbiomass.csv")
+
+aerial$Tissue <- "Aerial"
+roots$Tissue  <- "Roots"
+
+colnames(aerial)[1] <- "Biomass"
+colnames(roots)[1]  <- "Biomass"
+
+df <- bind_rows(aerial, roots)
+
+df <- df %>%
+  mutate(
+    MicB = factor(MicB),
+    MicP = factor(MicP),
+    Tissue = factor(Tissue),
+    Block = factor(Block),
+    Interaction = interaction(MicB, MicP, sep = ":")
+  )
+
+# =========================
+# RUN
+# =========================
+res_aerial <- run(
+  df %>% filter(Tissue == "Aerial"),
+  "Biomass",
+  "Aerial",
+  c("MicB", "MicP"),
+  "Results/Exp1"
+)
+
+res_roots <- run(
+  df %>% filter(Tissue == "Roots"),
+  "Biomass",
+  "Roots",
+  c("MicB", "MicP"),
+  "Results/Exp1"
+)
+
+anova_aerial <- as.data.frame(summary(res_aerial$model)[[1]])
+anova_roots  <- as.data.frame(summary(res_roots$model)[[1]])
+
+anova_aerial$FDR <- NA
+anova_roots$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_aerial,
+    anova_roots,
+    effect
+  )
+  
+  anova_aerial[effect, "FDR"] <- adj[1]
+  anova_roots[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_aerial,
+  "Results/Exp1/Tables/ANOVA_Arial_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_roots,
+  "Results/Exp1/Tables/ANOVA_Roots_FDR.csv",
+  row.names = FALSE
+)
+
+# treatment_colors <- c(
+#   "Abs:Abs" = adjust_ltc(ploen, amount = -25, which = c(3, 4))[4],
+#   "Prs:Abs"    = ltc("ploen")[1], 
+#   "Abs:Prs"    = adjust_ltc(ploen, amount = +25, which = c(3, 4))[5], 
+#   "Prs:Prs"   = adjust_ltc(ploen, amount = -25, which = c(3, 4))[3]  
+# )
+
+treatment_colors <- c(
+  "Abs:Abs" = ltc("alger")[1],
+  "Prs:Abs"    = ltc("alger")[2], 
+  "Abs:Prs"    = ltc("alger")[5], 
+  "Prs:Prs"   = ltc("alger")[4]
+)
+
+p_aerial <- plot_violin(
+  df %>% filter(Tissue == "Aerial"),
+  res_aerial$model,
+  "Biomass",
+  "Shoot biomass(mg)",
+  res_aerial$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_aerial
+)
+
+p_roots <- plot_violin(
+  df %>% filter(Tissue == "Roots"),
+  res_roots$model,
+  "Biomass",
+  "Roots biomass(mg)",
+  res_roots$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_roots
+)
+
+p <- p_aerial | p_roots
+
+ggsave(
+  filename = "Results/Exp1/Plots/Biomass_boxplot_pres.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Exp1/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp1/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+
+# =========================
+# SAVE FULL DATA
+# =========================
+write.csv(df,
+          "Results/Exp1/Tables/Full_dataset_clean.csv",
+          row.names = FALSE)
+```
+
+#Exp1ABdiff
+```{r}
+# =========================
+# INIT
+# ========================= 
+dir.create("Results/Exp1/ABdiff", showWarnings = FALSE)
+dir.create("Results/Exp1/ABdiff/Tables", showWarnings = FALSE)
+dir.create("Results/Exp1/ABdiff/Plots", showWarnings = FALSE)
+
+# =========================
+# LOAD DATA
+# =========================
+aerial <- read.csv("Data/Exp1/ABdiff/aerialbiomass.csv")
+roots  <- read.csv("Data/Exp1/ABdiff/rootsbiomass.csv")
+
+aerial$Tissue <- "Aerial"
+roots$Tissue  <- "Roots"
+
+colnames(aerial)[1] <- "Biomass"
+colnames(roots)[1]  <- "Biomass"
+
+df <- bind_rows(aerial, roots)
+
+df <- df %>%
+  mutate(
+    MicB = factor(MicB),
+    MicP = factor(MicP),
+    Tissue = factor(Tissue),
+    Block = factor(Block),
+    Interaction = interaction(MicB, MicP, sep = ":")
+  )
+
+# =========================
+# RUN
+# =========================
+res_aerial <- run(
+  df %>% filter(Tissue == "Aerial"),
+  "Biomass",
+  "Aerial",
+  c("MicB", "MicP"),
+  "Results/Exp1/ABdiff"
+)
+
+res_roots <- run(
+  df %>% filter(Tissue == "Roots"),
+  "Biomass",
+  "Roots",
+  c("MicB", "MicP"),
+  "Results/Exp1/ABdiff"
+)
+
+anova_aerial <- as.data.frame(summary(res_aerial$model)[[1]])
+anova_roots  <- as.data.frame(summary(res_roots$model)[[1]])
+
+anova_aerial$FDR <- NA
+anova_roots$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_aerial,
+    anova_roots,
+    effect
+  )
+  
+  anova_aerial[effect, "FDR"] <- adj[1]
+  anova_roots[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_aerial,
+  "Results/Exp1/ABdiff/Tables/ANOVA_Arial_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_roots,
+  "Results/Exp1/ABdiff/Tables/ANOVA_Roots_FDR.csv",
+  row.names = FALSE
+)
+
+treatment_colors <- c(
+  "Abs:Abs" = ltc("alger")[1],
+  "Prs:Abs"    = ltc("alger")[2], 
+  "Abs:Prs"    = ltc("alger")[5], 
+  "Prs:Prs"   = ltc("alger")[4]
+)
+
+p_aerial <- plot_violin(
+  df %>% filter(Tissue == "Aerial"),
+  res_aerial$model,
+  "Biomass",
+  "Shoot Biomass(mg)",
+  res_aerial$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_aerial
+)
+
+p_roots <- plot_violin(
+  df %>% filter(Tissue == "Roots"),
+  res_roots$model,
+  "Biomass",
+  "Roots Biomass(mg)",
+  res_roots$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_roots
+)
+
+p <- p_aerial | p_roots
+
+ggsave(
+  filename = "Results/Exp1/ABdiff/Plots/Biomass_boxplot.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp1/ABdiff/Plots/Biomass_boxplot.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+
+# =========================
+# SAVE FULL DATA
+# =========================
+write.csv(df,
+          "Results/Exp1/ABdiff/Tables/Full_dataset_clean.csv",
+          row.names = FALSE)
+```
+
+#Exp1ABmean
+```{r}
+# ========================= 
+# INIT
+# =========================
+dir.create("Results/Exp1/ABmean", showWarnings = FALSE)
+dir.create("Results/Exp1/ABmean/Tables", showWarnings = FALSE)
+dir.create("Results/Exp1/ABmean/Plots", showWarnings = FALSE)
+
+# =========================
+# LOAD DATA
+# =========================
+aerial <- read.csv("Data/Exp1/ABmean/aerialbiomass.csv")
+roots  <- read.csv("Data/Exp1/ABmean/rootsbiomass.csv")
+
+aerial$Tissue <- "Aerial"
+roots$Tissue  <- "Roots"
+
+colnames(aerial)[3] <- "Biomass"
+colnames(roots)[3]  <- "Biomass"
+
+df <- bind_rows(aerial, roots)
+
+df <- df %>%
+  mutate(
+    MicB = factor(MicB),
+    MicP = factor(MicP),
+    Tissue = factor(Tissue),
+    Block = factor(Block),
+    Interaction = interaction(MicB, MicP, sep = ":")
+  )
+
+# treatment_colors <- c(
+#   "Abs:Abs" = adjust_ltc(ploen, amount = -25, which = c(3, 4))[4],
+#   "Prs:Abs"    = ltc("ploen")[1], 
+#   "Abs:Prs"    = adjust_ltc(ploen, amount = +25, which = c(3, 4))[5], 
+#   "Prs:Prs"   = adjust_ltc(ploen, amount = -25, which = c(3, 4))[3]  
+# )
+
+treatment_colors <- c(
+  "Abs:Abs" = ltc("alger")[1],
+  "Prs:Abs"    = ltc("alger")[2], 
+  "Abs:Prs"    = ltc("alger")[5], 
+  "Prs:Prs"   = ltc("alger")[4]
+)
+
+# =========================
+# RUN
+# =========================
+res_aerial <- run(
+  df %>% filter(Tissue == "Aerial"),
+  "Biomass",
+  "Aerial",
+  c("MicB", "MicP"),
+  "Results/Exp1/ABmean"
+)
+
+res_roots <- run(
+  df %>% filter(Tissue == "Roots"),
+  "Biomass",
+  "Roots",
+  c("MicB", "MicP"),
+  "Results/Exp1/ABmean"
+)
+
+power_from_eta_sq(res_aerial$eta_sq)
+power_from_eta_sq(res_roots$eta_sq)
+
+anova_aerial <- as.data.frame(summary(res_aerial$model)[[1]])
+anova_roots  <- as.data.frame(summary(res_roots$model)[[1]])
+
+anova_aerial$FDR <- NA
+anova_roots$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_aerial,
+    anova_roots,
+    effect
+  )
+  
+  anova_aerial[effect, "FDR"] <- adj[1]
+  anova_roots[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_aerial,
+  "Results/Exp1/ABmean/Tables/ANOVA_Arial_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_roots,
+  "Results/Exp1/ABmean/Tables/ANOVA_Roots_FDR.csv",
+  row.names = FALSE
+)
+
+p_aerial <- plot_violin(
+  df %>% filter(Tissue == "Aerial"),
+  res_aerial$model,
+  "Biomass",
+  "Shoot biomass (mg)",
+  res_aerial$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_aerial
+)
+
+p_roots <- plot_violin(
+  df %>% filter(Tissue == "Roots"),
+  res_roots$model,
+  "Biomass",
+  "Roots biomass (mg)",
+  res_roots$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_roots
+)
+
+p <- p_aerial | p_roots
+
+ggsave(
+  filename = "Results/Exp1/ABmean/Plots/Biomass_boxplot.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Exp1/ABmean/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp1/ABmean/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+
+# =========================
+# SAVE FULL DATA
+# =========================
+write.csv(df,
+          "Results/Exp1/ABmean/Tables/Full_dataset_clean.csv",
+          row.names = FALSE)
+```
+
+#EXP1TEP
+```{r}
+# ========================= 
+# INIT
+# =========================
+dir.create("Results/Exp1/TEP", showWarnings = FALSE)
+dir.create("Results/Exp1/TEP/Tables", showWarnings = FALSE)
+dir.create("Results/Exp1/TEP/Plots", showWarnings = FALSE)
+
+# =========================
+# LOAD DATA
+# =========================
+aerial <- read.csv("Data/Exp1/TEP/aerialTEP.csv")
+roots  <- read.csv("Data/Exp1/TEP/rootsTEP.csv")
+
+aerial$Tissue <- "Aerial"
+roots$Tissue  <- "Roots"
+
+colnames(aerial)[1] <- "TEP"
+colnames(roots)[1]  <- "TEP"
+
+df <- bind_rows(aerial, roots)
+
+df <- df %>%
+  mutate(
+    MicB = factor(MicB),
+    MicP = factor(MicP),
+    Tissue = factor(Tissue),
+    Block = factor(Block),
+    Interaction = interaction(MicB, MicP, sep = ":")
+  )
+
+# =========================
+# RUN
+# =========================
+res_aerial <- run(
+  df %>% filter(Tissue == "Aerial"),
+  "TEP",
+  "Aerial",
+   c("MicB", "MicP"),
+  "Results/Exp1/TEP"
+)
+
+#TODO: rajotuer eta-squarred ou équivalent après l'aov
+res_roots <- run(
+  df %>% filter(Tissue == "Roots"),
+  "TEP", 
+  "Roots",
+  c("MicB", "MicP"),
+  "Results/Exp1/TEP"
+)
+
+anova_aerial <- as.data.frame(summary(res_aerial$model)[[1]])
+anova_roots  <- as.data.frame(summary(res_roots$model)[[1]])
+
+anova_aerial$FDR <- NA
+anova_roots$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_aerial,
+    anova_roots,
+    effect
+  )
+  
+  anova_aerial[effect, "FDR"] <- adj[1]
+  anova_roots[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_aerial,
+  "Results/Exp1/TEP/Tables/ANOVA_Arial_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_roots,
+  "Results/Exp1/TEP/Tables/ANOVA_Roots_FDR.csv",
+  row.names = FALSE
+)
+
+
+p_aerial <- plot_violin(
+  df %>% filter(Tissue == "Aerial"),
+  res_aerial$model,
+  "TEP",
+  "TEP(%)",
+  res_aerial$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_aerial
+)
+
+p_roots <- plot_violin(
+  df %>% filter(Tissue == "Roots"),
+  res_roots$model,
+  "TEP",
+  "TEP(%)",
+  res_roots$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_roots
+)
+
+p <- p_aerial | p_roots
+
+ggsave(
+  filename = "Results/Exp1/TEP/Plots/TEP.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp1/TEP/Plots/TEP.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+
+# =========================
+# SAVE FULL DATA
+# =========================
+write.csv(df,
+          "Results/Exp1/TEP/Tables/Full_dataset_clean.csv",
+          row.names = FALSE)
+
+```
+
+#EXP1TEPmean
+```{r}
+# ========================= 
+# INIT
+# =========================
+dir.create("Results/Exp1/TEP/mean", showWarnings = FALSE)
+dir.create("Results/Exp1/TEP/mean/Tables", showWarnings = FALSE)
+dir.create("Results/Exp1/TEP/mean/Plots", showWarnings = FALSE)
+
+# =========================
+# LOAD DATA
+# =========================
+df <- read.csv("Data/Exp1/TEP/mean/TEP_mean.csv")
+
+df$Tissue <- ifelse(seq_len(nrow(df)) %% 2 == 1, "Aerial", "Roots")
+
+colnames(df)[3] <- "TEP"
+
+df <- df %>%
+  mutate(
+    MicB = factor(MicB),
+    MicP = factor(MicP),
+    Tissue = factor(Tissue),
+    Block = factor(Block),
+    Interaction = interaction(MicB, MicP, sep = ":")
+  )
+
+# =========================
+# RUN
+# =========================
+res_aerial <- run(
+  df %>% filter(Tissue == "Aerial"),
+  "TEP",
+  "Aerial",
+   c("MicB", "MicP"),
+  "Results/Exp1/TEP/mean"
+)
+
+#TODO: rajotuer eta-squarred ou équivalent après l'aov
+res_roots <- run(
+  df %>% filter(Tissue == "Roots"),
+  "TEP", 
+  "Roots",
+  c("MicB", "MicP"),
+  "Results/Exp1/TEP/mean"
+)
+
+power_from_eta_sq(res_aerial$eta_sq)
+power_from_eta_sq(res_roots$eta_sq)
+
+anova_aerial <- as.data.frame(summary(res_aerial$model)[[1]])
+anova_roots  <- as.data.frame(summary(res_roots$model)[[1]])
+
+anova_aerial$FDR <- NA
+anova_roots$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_aerial,
+    anova_roots,
+    effect
+  )
+  
+  anova_aerial[effect, "FDR"] <- adj[1]
+  anova_roots[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_aerial,
+  "Results/Exp1/TEP/mean/Tables/ANOVA_Arial_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_roots,
+  "Results/Exp1/TEP/mean/Tables/ANOVA_Roots_FDR.csv",
+  row.names = FALSE
+)
+
+
+treatment_colors <- c(
+  "Abs:Abs" = ltc("alger")[1],
+  "Prs:Abs"    = ltc("alger")[2], 
+  "Abs:Prs"    = ltc("alger")[5], 
+  "Prs:Prs"   = ltc("alger")[4]
+)
+
+p_aerial <- plot_violin(
+  df %>% filter(Tissue == "Aerial"),
+  res_aerial$model,
+  "TEP",
+  "Shoot total extractable phenolic (%)",
+  res_aerial$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T. asperellum*", MicP = "*R. solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_aerial
+)
+
+p_roots <- plot_violin(
+  df %>% filter(Tissue == "Roots"),
+  res_roots$model,
+  "TEP",
+  "Roots total extractable phenolic (%)",
+  res_roots$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T. asperellum*", MicP = "*R. solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_roots
+)
+
+p <- p_aerial | p_roots
+
+ggsave(
+  filename = "Results/Exp1/TEP/mean/Plots/TEP.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Exp1/TEP/mean/Plots/TEP_text.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp1/TEP/mean/Plots/TEP_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+# =========================
+# SAVE FULL DATA
+# =========================
+write.csv(df,
+          "Results/Exp1/TEP/mean/Tables/Full_dataset_clean.csv",
+          row.names = FALSE)
+
+```
+
+#Exp2
+```{r}
+# =========================
+# INIT
+# =========================
+dir.create("Results/Exp2", showWarnings = FALSE)
+dir.create("Results/Exp2/Tables", showWarnings = FALSE)
+dir.create("Results/Exp2/Plots", showWarnings = FALSE)
+
+# =========================
+# LOAD DATA
+# =========================
+aerial <- read.csv("Data/Exp2/aerialbiomass.csv")
+roots  <- read.csv("Data/Exp2/rootsbiomass.csv")
+
+aerial$Tissue <- "Aerial"
+roots$Tissue  <- "Roots"
+
+colnames(aerial)[3] <- "Biomass"
+colnames(roots)[3]  <- "Biomass"
+
+df <- bind_rows(aerial, roots)
+
+df <- df %>%
+  mutate(
+    MicB = factor(MicB),
+    MicP = factor(MicP),
+    Tissue = factor(Tissue),
+    Block = factor(Block),
+    Interaction = interaction(MicB, MicP, sep = ":")
+  )
+
+# =========================
+# RUN
+# =========================
+res_aerial <- run(
+  df %>% filter(Tissue == "Aerial"),
+  "Biomass",
+  "Aerial",
+  c("MicB", "MicP"),
+  "Results/Exp2"
+)
+
+res_roots <- run(
+  df %>% filter(Tissue == "Roots"),
+  "Biomass",
+  "Roots",
+  c("MicB", "MicP"),
+  "Results/Exp2"
+)
+
+anova_aerial <- as.data.frame(summary(res_aerial$model)[[1]])
+anova_roots  <- as.data.frame(summary(res_roots$model)[[1]])
+
+anova_aerial$FDR <- NA
+anova_roots$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_aerial,
+    anova_roots,
+    effect
+  )
+  
+  anova_aerial[effect, "FDR"] <- adj[1]
+  anova_roots[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_aerial,
+  "Results/Exp2/Tables/ANOVA_Arial_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_roots,
+  "Results/Exp2/Tables/ANOVA_Roots_FDR.csv",
+  row.names = FALSE
+)
+
+# treatment_colors <- c(
+#   "Abs:Abs" = adjust_ltc(ploen, amount = -25, which = c(3, 4))[4],
+#   "Prs:Abs"    = ltc("ploen")[1], 
+#   "Abs:Prs"    = adjust_ltc(ploen, amount = +25, which = c(3, 4))[5], 
+#   "Prs:Prs"   = adjust_ltc(ploen, amount = -25, which = c(3, 4))[3]  
+# )
+
+treatment_colors <- c(
+  "Abs:Abs" = ltc("alger")[1],
+  "Prs:Abs"    = ltc("alger")[2], 
+  "Abs:Prs"    = ltc("alger")[5], 
+  "Prs:Prs"   = ltc("alger")[4]
+)
+
+p_aerial <- plot_violin(
+  df %>% filter(Tissue == "Aerial"),
+  res_aerial$model,
+  "Biomass",
+  "Shoot biomass(mg)",
+  res_aerial$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_aerial
+)
+
+p_roots <- plot_violin(
+  df %>% filter(Tissue == "Roots"),
+  res_roots$model,
+  "Biomass",
+  "Roots biomass(mg)",
+  res_roots$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_roots
+)
+
+p <- p_aerial | p_roots
+
+ggsave(
+  filename = "Results/Exp2/Plots/Biomass_boxplot.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Exp2/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp2/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+# =========================
+# SAVE FULL DATA
+# =========================
+write.csv(df,
+          "Results/Exp2/Tables/Full_dataset_clean.csv",
+          row.names = FALSE)
+
+# ========================= 
+# INIT
+# =========================
+dir.create("Results/Exp2/Rhizo", showWarnings = FALSE)
+dir.create("Results/Exp2/Rhizo/Tables", showWarnings = FALSE)
+dir.create("Results/Exp2/Rhizo/Plots", showWarnings = FALSE)
+
+# --- Init
+df <- read.csv("Data/Exp2/Rhizo.csv")
+
+# clean names
+colnames(df) <- c(
+  "MicB",
+  "MicP",
+  "total_length",
+  "avg_diameter",
+  "Block"
+)
+
+df$MicB <- factor(df$MicB)
+df$MicP <- factor(df$MicP)
+df$Block <- factor(df$Block)
+df$Interaction <- interaction(df$MicB, df$MicP, sep = ":")
+
+res_length <- run(df, "total_length", "total_length", factors = c("MicB", "MicP"), "Results/Exp2/Rhizo")
+res_diam <- run(df, "avg_diameter", "avg_diameter", factors = c("MicB", "MicP"), "Results/Exp2/Rhizo")
+
+anova_length <- as.data.frame(summary(res_length$model)[[1]])
+anova_diam  <- as.data.frame(summary(res_diam$model)[[1]])
+
+anova_length$FDR <- NA
+anova_diam$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_length,
+    anova_diam,
+    effect
+  )
+  
+  anova_length[effect, "FDR"] <- adj[1]
+  anova_diam[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_length,
+  "Results/Exp2/Rhizo/Tables/ANOVA_Length_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_diam,
+  "Results/Exp2/Rhizo/Tables/ANOVA_Diam_FDR.csv",
+  row.names = FALSE
+)
+
+treatment_colors <- c(
+  "Abs:Abs" = ltc("alger")[1],
+  "Prs:Abs"    = ltc("alger")[2], 
+  "Abs:Prs"    = ltc("alger")[5], 
+  "Prs:Prs"   = ltc("alger")[4]
+)
+
+p_length <- plot_violin(
+  df,
+  res_length$model,
+  "total_length",
+  "Total roots length (cm)",
+  res_length$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T. asperellum*", MicP = "*R. solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_length
+)
+
+p_diam <- plot_violin(
+  df,
+  res_diam$model,
+  "avg_diameter",
+  "Average roots diameter (cm)",
+  res_diam$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T. asperellum*", MicP = "*R. solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  p_adj = anova_diam
+)
+
+p <- p_length | p_diam
+
+ggsave(
+  filename = "Results/Exp2/Rhizo/Plots/Rhizo_boxplot.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Exp2/Rhizo/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp2/Rhizo/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+
+```
+
+#Exp2ABmean
+```{r}
+# =========================
+# INIT    
+# =========================
+dir.create("Results/Exp2/ABmean", showWarnings = FALSE)
+dir.create("Results/Exp2/ABmean/Tables", showWarnings = FALSE)
+dir.create("Results/Exp2/ABmean/Plots", showWarnings = FALSE)
+
+# =========================
+# LOAD DATA
+# =========================
+aerial <- read.csv("Data/Exp2/ABmean/aerialbiomass.csv")
+roots  <- read.csv("Data/Exp2/ABmean/rootsbiomass.csv")
+
+aerial$Tissue <- "Aerial"
+roots$Tissue  <- "Roots"
+
+colnames(aerial)[3] <- "Biomass"
+colnames(roots)[3]  <- "Biomass"
+
+df <- bind_rows(aerial, roots)
+
+df <- df %>%
+  mutate(
+    MicB = factor(MicB),
+    MicP = factor(MicP),
+    Tissue = factor(Tissue),
+    Block = factor(Block),
+    Interaction = interaction(MicB, MicP, sep = ":")
+  )
+
+# =========================
+# RUN
+# =========================
+res_aerial <- run(
+  df %>% filter(Tissue == "Aerial"),
+  "Biomass",
+  "Aerial",
+  c("MicB", "MicP"),
+  "Results/Exp2/ABmean/"
+)
+
+res_roots <- run(
+  df %>% filter(Tissue == "Roots"),
+  "Biomass",
+  "Roots",
+  c("MicB", "MicP"),
+  "Results/Exp2/ABmean/"
+)
+
+anova_aerial <- as.data.frame(summary(res_aerial$model)[[1]])
+anova_roots  <- as.data.frame(summary(res_roots$model)[[1]])
+
+anova_aerial$FDR <- NA
+anova_roots$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_aerial,
+    anova_roots,
+    effect
+  )
+  
+  anova_aerial[effect, "FDR"] <- adj[1]
+  anova_roots[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_aerial,
+  "Results/Exp2/ABmean/Tables/ANOVA_Arial_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_roots,
+  "Results/Exp2/ABmean/Tables/ANOVA_Roots_FDR.csv",
+  row.names = FALSE
+)
+
+treatment_colors <- c(
+  "Abs:Abs" = ltc("alger")[1],
+  "Prs:Abs"    = ltc("alger")[2], 
+  "Abs:Prs"    = ltc("alger")[5], 
+  "Prs:Prs"   = ltc("alger")[4]
+)
+
+p_aerial <- plot_violin(
+  df %>% filter(Tissue == "Aerial"),
+  res_aerial$model,
+  "Biomass",
+  "Shoot biomass(mg)",
+  res_aerial$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  padding_label = c(0.05, 0.20),
+  p_adj = anova_aerial
+)
+
+p_roots <- plot_violin(
+  df %>% filter(Tissue == "Roots"),
+  res_roots$model,
+  "Biomass",
+  "Roots biomass(mg)",
+  res_roots$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  padding_label = c(0.05, 0.20),
+  p_adj = anova_roots
+)
+
+p <- p_aerial | p_roots
+
+ggsave(
+  filename = "Results/Exp2/ABmean/Plots/Biomass_boxplot.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Exp2/ABmean/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp2/ABmean/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+
+# =========================
+# SAVE FULL DATA
+# =========================
+write.csv(df,
+          "Results/Exp2/ABmean/Tables/Full_dataset_clean.csv",
+          row.names = FALSE)
+
+# ========================= 
+# INIT
+# =========================
+dir.create("Results/Exp2/Rhizo/ABmean", showWarnings = FALSE)
+dir.create("Results/Exp2/Rhizo/ABmean/Tables", showWarnings = FALSE)
+dir.create("Results/Exp2/Rhizo/ABmean/Plots", showWarnings = FALSE)
+
+# --- Init
+df <- read.csv("Data/Exp2/ABmean/Rhizo.csv")
+
+# clean names
+colnames(df) <- c(
+  "MicB",
+  "MicP",
+  "total_length",
+  "avg_diameter",
+  "Block"
+)
+
+df$MicB <- factor(df$MicB)
+df$MicP <- factor(df$MicP)
+df$Block <- factor(df$Block)
+df$Interaction <- interaction(df$MicB, df$MicP, sep = ":")
+
+res_length <- run(df, "total_length", "total_length", factors = c("MicB", "MicP"), "Results/Exp2/Rhizo/ABmean")
+res_diam <- run(df, "avg_diameter", "avg_diameter", factors = c("MicB", "MicP"), "Results/Exp2/Rhizo/ABmean")
+
+anova_length <- as.data.frame(summary(res_length$model)[[1]])
+anova_diam  <- as.data.frame(summary(res_diam$model)[[1]])
+
+anova_length$FDR <- NA
+anova_diam$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_length,
+    anova_diam,
+    effect
+  )
+  
+  anova_length[effect, "FDR"] <- adj[1]
+  anova_diam[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_length,
+  "Results/Exp2/Rhizo/ABmean/Tables/ANOVA_Length_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_diam,
+  "Results/Exp2/Rhizo/ABmean/Tables/ANOVA_Diam_FDR.csv",
+  row.names = FALSE
+)
+
+# treatment_colors <- c(
+#   "Abs:Abs" = adjust_ltc(ploen, amount = -25, which = c(3, 4))[4],
+#   "Prs:Abs"    = ltc("ploen")[1], 
+#   "Abs:Prs"    = adjust_ltc(ploen, amount = +25, which = c(3, 4))[5], 
+#   "Prs:Prs"   = adjust_ltc(ploen, amount = -25, which = c(3, 4))[3]  
+# )
+
+treatment_colors <- c(
+  "Abs:Abs" = ltc("alger")[1],
+  "Prs:Abs"    = ltc("alger")[2], 
+  "Abs:Prs"    = ltc("alger")[5], 
+  "Prs:Prs"   = ltc("alger")[4]
+)
+
+p_length <- plot_violin(
+  df,
+  res_length$model,
+  "total_length",
+  "Total roots length (cm)",
+  res_length$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T. asperellum*", MicP = "*R. solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  padding_label = c(0.05, 0.20),
+  p_adj = anova_length
+)
+
+p_diam <- plot_violin(
+  df,
+  res_diam$model,
+  "avg_diameter",
+  "Average roots diameter (cm)",
+  res_diam$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T. asperellum*", MicP = "*R. solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  padding_label = c(0.05, 0.20),
+  p_adj = anova_diam
+)
+
+p <- p_length | p_diam
+
+ggsave(
+  filename = "Results/Exp2/Rhizo/ABmean/Plots/Rhizo_boxplot.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Exp2/Rhizo/ABmean/Plots/Rhizo_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp2/Rhizo/ABmean/Plots/Rhizo_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+```
+
+#Exp2ABdiff
+```{r}
+# =========================
+# INIT      
+# =========================
+dir.create("Results/Exp2/ABdiff", showWarnings = FALSE)
+dir.create("Results/Exp2/ABdiff/Tables", showWarnings = FALSE)
+dir.create("Results/Exp2/ABdiff/Plots", showWarnings = FALSE)
+
+# =========================
+# LOAD DATA
+# =========================
+aerial <- read.csv("Data/Exp2/ABdiff/aerialbiomass.csv")
+roots  <- read.csv("Data/Exp2/ABdiff/rootsbiomass.csv")
+
+aerial$Tissue <- "Aerial"
+roots$Tissue  <- "Roots"
+
+colnames(aerial)[3] <- "Biomass"
+colnames(roots)[3]  <- "Biomass"
+
+df <- bind_rows(aerial, roots)
+
+df <- df %>%
+  mutate(
+    MicB = factor(MicB),
+    MicP = factor(MicP),
+    Tissue = factor(Tissue),
+    Block = factor(Block),
+    Interaction = interaction(MicB, MicP, sep = ":")
+  )
+
+# =========================
+# RUN
+# =========================
+res_aerial <- run(
+  df %>% filter(Tissue == "Aerial"),
+  "Biomass",
+  "Aerial",
+  c("MicB", "MicP"),
+  "Results/Exp2/ABdiff/"
+)
+
+res_roots <- run(
+  df %>% filter(Tissue == "Roots"),
+  "Biomass",
+  "Roots",
+  c("MicB", "MicP"),
+  "Results/Exp2/ABdiff/"
+)
+
+anova_aerial <- as.data.frame(summary(res_aerial$model)[[1]])
+anova_roots  <- as.data.frame(summary(res_roots$model)[[1]])
+
+anova_aerial$FDR <- NA
+anova_roots$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_aerial,
+    anova_roots,
+    effect
+  )
+  
+  anova_aerial[effect, "FDR"] <- adj[1]
+  anova_roots[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_aerial,
+  "Results/Exp2/ABdiff/Tables/ANOVA_Arial_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_roots,
+  "Results/Exp2/ABdiff/Tables/ANOVA_Roots_FDR.csv",
+  row.names = FALSE
+)
+
+# treatment_colors <- c(
+#   "Abs:Abs" = adjust_ltc(ploen, amount = -25, which = c(3, 4))[4],
+#   "Prs:Abs"    = ltc("ploen")[1], 
+#   "Abs:Prs"    = adjust_ltc(ploen, amount = +25, which = c(3, 4))[5], 
+#   "Prs:Prs"   = adjust_ltc(ploen, amount = -25, which = c(3, 4))[3]  
+# )
+
+treatment_colors <- c(
+  "Abs:Abs" = ltc("alger")[1],
+  "Prs:Abs"    = ltc("alger")[2], 
+  "Abs:Prs"    = ltc("alger")[5], 
+  "Prs:Prs"   = ltc("alger")[4]
+)
+
+p_aerial <- plot_violin(
+  df %>% filter(Tissue == "Aerial"),
+  res_aerial$model,
+  "Biomass",
+  "Shoot biomass(mg)",
+  res_aerial$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  padding_label = c(0.05, 0.20),
+  p_adj = anova_aerial
+)
+
+p_roots <- plot_violin(
+  df %>% filter(Tissue == "Roots"),
+  res_roots$model,
+  "Biomass",
+  "Roots biomass(mg)",
+  res_roots$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T.asperellum*", MicP = "*R.solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  padding_label = c(0.05, 0.20),
+  p_adj = anova_roots
+)
+
+p <- p_aerial | p_roots
+
+ggsave(
+  filename = "Results/Exp2/ABdiff/Plots/Biomass_boxplot.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Exp2/ABdiff/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp2/ABdiff/Plots/Biomass_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+
+# =========================
+# SAVE FULL DATA
+# =========================
+write.csv(df,
+          "Results/Exp2/ABdiff/Tables/Full_dataset_clean.csv",
+          row.names = FALSE)
+
+
+# ========================= 
+# INIT
+# =========================
+dir.create("Results/Exp2/Rhizo/ABdiff", showWarnings = FALSE)
+dir.create("Results/Exp2/Rhizo/ABdiff/Tables", showWarnings = FALSE)
+dir.create("Results/Exp2/Rhizo/ABdiff/Plots", showWarnings = FALSE)
+
+# --- Init
+df <- read.csv("Data/Exp2/ABdiff/Rhizo.csv")
+
+# clean names
+colnames(df) <- c(
+  "MicB",
+  "MicP",
+  "total_length",
+  "avg_diameter",
+  "Block"
+)
+
+df$MicB <- factor(df$MicB)
+df$MicP <- factor(df$MicP)
+df$Block <- factor(df$Block)
+df$Interaction <- interaction(df$MicB, df$MicP, sep = ":")
+
+res_length <- run(df, "total_length", "total_length", factors = c("MicB", "MicP"), "Results/Exp2/Rhizo/ABdiff")
+res_diam <- run(df, "avg_diameter", "avg_diameter", factors = c("MicB", "MicP"), "Results/Exp2/Rhizo/ABdiff")
+
+anova_length <- as.data.frame(summary(res_length$model)[[1]])
+anova_diam  <- as.data.frame(summary(res_diam$model)[[1]])
+
+anova_length$FDR <- NA
+anova_diam$FDR <- NA
+
+effects <- c(rownames(anova_aerial)[c(1,2,4)])
+
+for(effect in effects){
+  
+  adj <- fdr(
+    anova_length,
+    anova_diam,
+    effect
+  )
+  
+  anova_length[effect, "FDR"] <- adj[1]
+  anova_diam[effect, "FDR"] <- adj[2]
+}
+
+write.csv(
+  anova_length,
+  "Results/Exp2/Rhizo/ABdiff/Tables/ANOVA_Length_FDR.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  anova_diam,
+  "Results/Exp2/Rhizo/ABdiff/Tables/ANOVA_Diam_FDR.csv",
+  row.names = FALSE
+)
+
+# treatment_colors <- c(
+#   "Abs:Abs" = adjust_ltc(ploen, amount = -25, which = c(3, 4))[4],
+#   "Prs:Abs"    = ltc("ploen")[1], 
+#   "Abs:Prs"    = adjust_ltc(ploen, amount = +25, which = c(3, 4))[5], 
+#   "Prs:Prs"   = adjust_ltc(ploen, amount = -25, which = c(3, 4))[3]  
+# )
+
+treatment_colors <- c(
+  "Abs:Abs" = ltc("alger")[1],
+  "Prs:Abs"    = ltc("alger")[2], 
+  "Abs:Prs"    = ltc("alger")[5], 
+  "Prs:Prs"   = ltc("alger")[4]
+)
+
+p_length <- plot_violin(
+  df,
+  res_length$model,
+  "total_length",
+  "Total roots length (cm)",
+  res_length$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T. asperellum*", MicP = "*R. solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  padding_label = c(0.05, 0.20)
+)
+
+p_diam <- plot_violin(
+  df,
+  res_diam$model,
+  "avg_diameter",
+  "Average roots diameter (cm)",
+  res_diam$letters,
+  treatment_colors = treatment_colors,
+  facet_var = "MicP",
+  facet_direction = "cols",
+  treatment_labels = c(MicB = "*T. asperellum*", MicP = "*R. solani*"),
+  level_labels = c(Prs = "+", Abs = "-"),
+  padding_label = c(0.05, 0.20)
+)
+
+p <- p_length | p_diam
+
+ggsave(
+  filename = "Results/Exp2/Rhizo/ABdiff/Plots/Rhizo_boxplot.pdf",
+  plot = p,
+  width = 26,
+  height = 20
+)
+
+ggsave(
+  filename = "Results/Exp2/Rhizo/ABdiff/Plots/Rhizo_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 14
+)
+
+ggsave(
+  filename = "Results/Exp2/Rhizo/ABdiff/Plots/Rhizo_boxplot_text.pdf",
+  plot = p,
+  width = 17,
+  height = 10
+)
+```
