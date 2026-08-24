@@ -1,0 +1,6 @@
+
+	Shapiro-Wilk normality test
+
+data:  residuals(model)
+W = 0.91391, p-value = 0.00498
+
